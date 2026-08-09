@@ -1,0 +1,46 @@
+[
+  {
+    "item_name": "batch_test_p1",
+    "word": [
+      "안",
+      "녕"
+    ],
+    "pitch": [
+      60,
+      62
+    ],
+    "note": [
+      "<NOTE_4>",
+      "<NOTE_4>"
+    ],
+    "pitch2word": [
+      0,
+      1
+    ],
+    "bpm": 100
+  },
+  {
+    "item_name": "batch_test_p2",
+    "word": [
+      "하",
+      "세",
+      "요"
+    ],
+    "pitch": [
+      64,
+      65,
+      67
+    ],
+    "note": [
+      "<NOTE_4>",
+      "<NOTE_8>",
+      "<NOTE_8>"
+    ],
+    "pitch2word": [
+      0,
+      1,
+      2
+    ],
+    "bpm": 100
+  }
+]

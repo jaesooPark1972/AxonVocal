@@ -1,0 +1,22 @@
+[
+  {
+    "item_name": "full_song_test_p1",
+    "word": [
+      "안",
+      "녕"
+    ],
+    "pitch": [
+      60,
+      62
+    ],
+    "note": [
+      "<NOTE_4>",
+      "<NOTE_4>"
+    ],
+    "pitch2word": [
+      0,
+      1
+    ],
+    "bpm": 90
+  }
+]

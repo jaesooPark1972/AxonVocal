@@ -1,39 +1,40 @@
+```
 # Python
 __pycache__/
 *.pyc
 *.pyo
-*.egg-info/
+*.pyd
+
+# Build artifacts
 build/
 dist/
-.venv/
+*.egg-info/
 
-# Model assets & data (download / generate locally)
-pretrained_models/
-checkpoints/
-data/
-output/
+# Test outputs
 outputs/
-prompts/
-log/
-logs/
-runs/
 
-# Audio artifacts
-*.wav
-*.flac
-*.mp3
-*.ogg
+# Virtual environments
+.venv/
+venv/
+env/
 
-# Project-page demos are intentionally versioned.
-!assets/audio/**/*.wav
-!assets/audio/**/*.flac
-!assets/audio/**/*.mp3
-!assets/audio/**/*.ogg
+# Logs
+*.log
 
-# Prompt audio used by the reproducible single-inference examples.
-!examples/prompt_audio/*.wav
-
-# Editor / OS
-.idea/
-.vscode/
+# OS generated files
 .DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Coverage reports
+.coverage
+coverage/
+htmlcov/
+
+# Temporary files
+*.tmp
+*.swp
+```
