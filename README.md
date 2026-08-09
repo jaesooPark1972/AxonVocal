@@ -45,9 +45,24 @@ VocalRender is built around three ideas:
 2. **Continuous acoustic representation.** An Audio VAE encodes singing into
    compact continuous latents, retaining fine-grained pitch, timbre, and
    articulation information without discrete acoustic quantization.
-3. **Autoregressive diffusion generation.** The AR Transformer generates a
-   prosody sketch and predicts the sequence length patch by patch, while
-   LocDiT reconstructs high-fidelity local acoustic latents. The VAE decoder
+5. **Full-length phrase rendering.** Long lyrics are automatically split into
+   phrase-sized chunks, rendered sequentially, and concatenated into a single finished
+   track (`outputs/full_song_*.wav`) without mid-song truncation.
+
+## AXON Sovereign VocalStudio (GUI Studio)
+
+This repository also ships a tkinter-based production studio built on the inference pipeline above:
+
+```bash
+pythonw AXON_VocalStudio.pyw
+```
+
+- **12 expert score presets & AI composition** with strict lyric ↔ MIDI-pitch 1:1 alignment.
+- **Full-length rendering for long lyrics**: long lyrics are automatically split into
+  phrase-sized chunks, rendered sequentially, and concatenated into a single finished
+  track (`outputs/full_song_*.wav`) — no mid-song truncation.
+- **48 kHz mastering mixer**: vocal + MR/BGM gain/reverb mixing (`outputs/master_song_*.wav`).
+- **Prompt audio**: use a clean 2–8 s vocal clip for timbre conditioning (required by the checkpoints).
    then renders the completed latent sequence into waveform audio. This avoids
    an explicit duration predictor and time-aligned acoustic guidance.
 

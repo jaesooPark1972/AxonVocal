@@ -202,15 +202,14 @@ def encode_prompt_audio(
     target_sr = get_in_sample_rate(model)
     patch_size = model.patch_size
 
-    # Load audio
-    audio_data, sr = sf.read(wav_path)
-    wav = torch.from_numpy(audio_data).float()
-    if wav.dim() == 2:
-        wav = wav.mean(dim=1)  # stereo → mono
-
-    # Resample if needed
-    if sr != target_sr:
-        wav = torchaudio.transforms.Resample(sr, target_sr)(wav.unsqueeze(0)).squeeze(0)
+    # Load audio using librosa (supports .wav, .mp3, .m4a, .flac, .ogg, etc.)
+    import librosa
+    try:
+        audio_data, sr = librosa.load(wav_path, sr=target_sr, duration=10.0)
+        wav = torch.from_numpy(audio_data).float()
+    except Exception as e:
+        print(f"Error loading prompt audio '{wav_path}': {e}", file=sys.stderr)
+        return None
 
     # VAE encode: [1, 1, T_wav] → [1, D, T'] → [T', D]
     wav_input = wav.unsqueeze(0).unsqueeze(0)  # [1, 1, T]
@@ -260,8 +259,12 @@ def parse_args():
     # Input
     parser.add_argument("--json_file", required=True,
                         help="JSON label file (e.g. Opencpop.json)")
-    parser.add_argument("--item_name", required=True,
-                        help="item_name of the entry to synthesize")
+    parser.add_argument("--item_name", default=None,
+                        help="item_name of the entry to synthesize (optional in --batch mode)")
+    parser.add_argument("--batch", action="store_true",
+                        help="Run batch mode for all entries in --json_file with 1-time model loading")
+    parser.add_argument("--output_dir", default=None,
+                        help="Output directory for --batch mode")
 
     # Prompt audio is required: released checkpoints were trained with
     # prompt_audio_prob=1.0, so prompt-free inference is out-of-distribution.
@@ -285,6 +288,9 @@ def parse_args():
 
 
 def main():
+    import os
+    if hasattr(os, 'cpu_count'):
+        torch.set_num_threads(min(16, os.cpu_count() or 8))
     args = parse_args()
 
     if args.device == "cuda" and not torch.cuda.is_available():
@@ -297,42 +303,27 @@ def main():
     with open(args.json_file, "r", encoding="utf-8") as f:
         all_entries = json.load(f)
 
-    # Build item_name → entry index for quick lookup
-    name_to_entry = {}
-    for e in all_entries:
-        name = e.get("item_name")
-        if name:
-            name_to_entry[name] = e
+    if not isinstance(all_entries, list):
+        all_entries = [all_entries]
 
-    entry = name_to_entry.get(args.item_name)
-    if entry is None:
-        print(f"Error: item_name '{args.item_name}' not found", file=sys.stderr)
-        sys.exit(1)
-
-    has_score = bool(entry.get("pitch") and entry.get("note"))
-    effective_mode = "lyrics-only" if args.lyrics_only else ("full" if has_score else "weak")
-    print(f"[SVS Single] Entry: {args.item_name}", file=sys.stderr)
-    print(f"  words: {''.join(entry['word'])}", file=sys.stderr)
-    print(f"  bpm: {entry.get('bpm', 120)}, label: {effective_mode}",
-          file=sys.stderr)
+    if not args.batch and args.item_name:
+        target_entries = [e for e in all_entries if e.get("item_name") == args.item_name]
+        if not target_entries:
+            print(f"Error: item_name '{args.item_name}' not found", file=sys.stderr)
+            sys.exit(1)
+    else:
+        target_entries = all_entries
 
     wav_path = Path(args.prompt_audio)
     if not wav_path.is_file():
         print(f"Error: prompt audio not found: {wav_path}", file=sys.stderr)
         sys.exit(1)
 
-    # ---- Load model ----
+    # ---- Load model (LOAD ONCE FOR ALL PHRASES) ----
     model = load_svs_model(args.ckpt_dir, device=args.device)
     sample_rate = get_out_sample_rate(model)
 
-    # ---- Build SVS prompt ----
-    svs_prompt = build_svs_prompt_from_entry(
-        entry, model, force_lyrics_only=args.lyrics_only,
-    )
-    print(f"  prompt: {svs_prompt[:200]}{'...' if len(svs_prompt) > 200 else ''}",
-          file=sys.stderr)
-
-    # ---- Required prompt audio (on-the-fly VAE encode) ----
+    # ---- Encode prompt audio (ENCODE ONCE FOR ALL PHRASES) ----
     print(f"[SVS Single] Encoding prompt audio: {wav_path}", file=sys.stderr)
     prompt_audio_feats = encode_prompt_audio(
         str(wav_path), model, max_frames=args.prompt_max_frames,
@@ -340,43 +331,57 @@ def main():
     if prompt_audio_feats is None or prompt_audio_feats.numel() == 0:
         print("Error: prompt audio encoding failed", file=sys.stderr)
         sys.exit(1)
-    print(f"  prompt latent: {prompt_audio_feats.shape}", file=sys.stderr)
 
-    # ---- Generate ----
-    print(f"[SVS Single] Generating (cfg={args.cfg_value}, "
-          f"steps={args.inference_timesteps}, max_len={args.max_len})...",
-          file=sys.stderr)
-
-    gen_kwargs = dict(
-        target_texts=[svs_prompt],
-        cfg_value=args.cfg_value,
-        inference_timesteps=args.inference_timesteps,
-        max_len=args.max_len,
-        verbose=True,
-        temperature=args.temperature,
-        fsq_temperature=args.fsq_temperature,
-        prompt_audio_feats=[prompt_audio_feats],
-    )
-
-    with torch.no_grad():
-        audio_tensors = model.generate_batch(**gen_kwargs)
-
-    if not audio_tensors or audio_tensors[0] is None or audio_tensors[0].numel() == 0:
-        print("Error: audio generation failed", file=sys.stderr)
-        sys.exit(1)
-
-    # ---- Save ----
     from vocalrender.evaluation.audio_utils import normalize_audio
     import soundfile as sf
 
-    audio_np = normalize_audio(audio_tensors[0].float().numpy().flatten())
-    duration = len(audio_np) / sample_rate
+    out_dir = Path(args.output_dir) if args.output_dir else Path(args.output).parent
 
-    output_path = Path(args.output)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    sf.write(str(output_path), audio_np, sample_rate)
+    print(f"[SVS Batch] Synthesizing {len(target_entries)} phrase entries...", file=sys.stderr)
 
-    print(f"[SVS Single] Saved: {output_path} ({duration:.2f}s)", file=sys.stderr)
+    for idx_entry, entry in enumerate(target_entries, 1):
+        item_name = entry.get("item_name", f"entry_{idx_entry}")
+        has_score = bool(entry.get("pitch") and entry.get("note"))
+        effective_mode = "lyrics-only" if args.lyrics_only else ("full" if has_score else "weak")
+        print(f"[{idx_entry}/{len(target_entries)}] Entry: {item_name} (mode: {effective_mode})", file=sys.stderr)
+
+        svs_prompt = build_svs_prompt_from_entry(
+            entry, model, force_lyrics_only=args.lyrics_only,
+        )
+        num_syllables = len(entry.get("word", []))
+        dynamic_max_len = min(4000, max(400, int(num_syllables * 35 + 200)))
+
+        gen_kwargs = dict(
+            target_texts=[svs_prompt],
+            cfg_value=args.cfg_value,
+            inference_timesteps=args.inference_timesteps,
+            max_len=dynamic_max_len,
+            verbose=False,
+            temperature=args.temperature,
+            fsq_temperature=args.fsq_temperature,
+            prompt_audio_feats=[prompt_audio_feats],
+        )
+
+        with torch.no_grad():
+            audio_tensors = model.generate_batch(**gen_kwargs)
+
+        if not audio_tensors or audio_tensors[0] is None or audio_tensors[0].numel() == 0:
+            print(f"Error: audio generation failed for {item_name}", file=sys.stderr)
+            continue
+
+        audio_np = normalize_audio(audio_tensors[0].float().numpy().flatten())
+        duration = len(audio_np) / sample_rate
+
+        if args.batch or len(target_entries) > 1:
+            out_file = out_dir / f"singing_{item_name}.wav"
+        else:
+            out_file = Path(args.output)
+
+        out_file.parent.mkdir(parents=True, exist_ok=True)
+        sf.write(str(out_file), audio_np, sample_rate)
+        print(f"  -> Saved: {out_file} ({duration:.2f}s)", file=sys.stderr)
+
+    print(f"[SVS Batch] All {len(target_entries)} phrase entries completed successfully!", file=sys.stderr)
 
 
 if __name__ == "__main__":

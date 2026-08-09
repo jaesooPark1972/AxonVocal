@@ -13,6 +13,7 @@ checkpoints/
 data/
 output/
 outputs/
+prompts/
 log/
 logs/
 runs/

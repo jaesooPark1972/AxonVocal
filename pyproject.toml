@@ -46,11 +46,9 @@ dependencies = [
     "audiobox-aesthetics>=0.0.4",
 ]
 
-[project.optional-dependencies]
 # Staff-notation score rendering (save_score: true in inference).
 viz = [
     "music21>=9.9.1",
-    "lilypond>=2.25.12",
 ]
 dev = [
     "pytest>=6.0",
